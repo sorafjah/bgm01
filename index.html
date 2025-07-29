@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BGM Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js"></script>
+    <style>
+        body { font-family: 'Noto Sans JP', sans-serif; }
+        .font-display { font-family: 'Mochiy Pop One', sans-serif; }
+        .btn-style { transition: all 0.2s ease-in-out; }
+        .btn-style:hover { transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .btn-style:active { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner { animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-display text-gray-800">BGM Generator</h1>
+            <p class="mt-2 text-gray-500">イメージワードを選んで、あなただけのBGMを作ろう！</p>
+        </header>
+        <div id="button-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 md:gap-6"></div>
+        <div id="status-indicator" class="text-center my-8 h-10 flex items-center justify-center hidden">
+            <div id="loading-spinner" class="spinner w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mr-3"></div>
+            <span id="status-text" class="text-lg text-gray-600"></span>
+        </div>
+        <div id="player" class="mt-8 p-6 bg-white rounded-2xl shadow-lg hidden">
+            <div class="flex flex-col sm:flex-row items-center justify-between">
+                <div class="mb-4 sm:mb-0">
+                    <p class="text-sm text-gray-500">NOW PLAYING</p>
+                    <h2 id="current-bgm-title" class="text-2xl font-bold text-gray-800"></h2>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="play-pause-btn" class="w-16 h-16 bg-blue-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-blue-600 transition">
+                        <svg id="play-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        <svg id="pause-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="currentColor" class="hidden"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                    </button>
+                    <button id="download-btn" class="px-4 py-2 bg-green-500 text-white rounded-full flex items-center space-x-2 text-sm hover:bg-green-600 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <span>MP3</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全ジャンル定義
+        const imageWords = {
+            yuttari: { name: 'ゆったり', emoji: '☁️', color: 'bg-sky-200', hover: 'hover:bg-sky-300' },
+            amenohi: { name: 'あめのひ', emoji: '☔️', color: 'bg-slate-300', hover: 'hover:bg-slate-400' },
+            seseragi: { name: 'せせらぎ', emoji: '🏞️', color: 'bg-teal-200', hover: 'hover:bg-teal-300' },
+            tabidachi: { name: 'たびだち', emoji: '✈️', color: 'bg-amber-200', hover: 'hover:bg-amber-300' },
+            bouken: { name: 'ぼうけん', emoji: '🧭', color: 'bg-orange-300', hover: 'hover:bg-orange-400' },
+            tatakai: { name: 'たたかい', emoji: '⚔️', color: 'bg-red-400', hover: 'hover:bg-red-500' },
+            bossa: { name: 'ボサノバ', emoji: '🎷', color: 'bg-purple-300', hover: 'hover:bg-purple-400' },
+            acid: { name: 'アシッド', emoji: '🧪', color: 'bg-lime-300', hover: 'hover:bg-lime-400' },
+            happycore: { name: 'ハピコア', emoji: '✨', color: 'bg-pink-300', hover: 'hover:bg-pink-400' },
+            metal: { name: 'ヘビメタ', emoji: '🤘', color: 'bg-gray-500', hover: 'hover:bg-gray-600' },
+            minimal: { name: 'ミニマル', emoji: '🔳', color: 'bg-gray-200', hover: 'hover:bg-gray-300' },
+            trance: { name: 'トランス', emoji: '💫', color: 'bg-cyan-300', hover: 'hover:bg-cyan-400' },
+        };
+        
+        const BGM_DURATION_SECONDS = 16;
+        const buttonGrid = document.getElementById('button-grid');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const player = document.getElementById('player');
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        const playIcon = document.getElementById('play-icon');
+        const pauseIcon = document.getElementById('pause-icon');
+        const downloadBtn = document.getElementById('download-btn');
+        const currentBgmTitle = document.getElementById('current-bgm-title');
+
+        let isPlaying = false;
+        let currentStyle = null;
+        let instruments = [];
+        let scheduledEvents = [];
+
+        // BGM Factory (ジャンルごとに分岐)
+        const bgmFactory = {
+            cleanup() {
+                try { Tone.Transport.stop(); Tone.Transport.cancel(); } catch (e) {}
+                scheduledEvents.forEach(e => {
+                    if (typeof e.stop === "function") e.stop();
+                    if (typeof e.cancel === "function") e.cancel();
+                });
+                scheduledEvents = [];
+                instruments.forEach(i => {
+                    if (typeof i.dispose === "function") i.dispose();
+                });
+                instruments = [];
+            },
+            yuttari() {
+                this.cleanup(); Tone.Transport.bpm.value = 75;
+                const pad = new Tone.PolySynth(Tone.Synth, {oscillator: {type: 'sine'}}).toDestination();
+                instruments.push(pad);
+                const notes = ["C4", "F4", "G4", "C4"];
+                let idx = 0;
+                const padLoop = new Tone.Loop(time => {
+                    pad.triggerAttackRelease(notes[idx % 4], '2n', time); idx++;
+                }, '2n').start(0);
+                scheduledEvents.push(padLoop);
+            },
+            amenohi() {
+                this.cleanup(); Tone.Transport.bpm.value = 90;
+                const synth = new Tone.FMSynth().toDestination();
+                instruments.push(synth);
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("C4", '8n', time);
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            seseragi() {
+                this.cleanup(); Tone.Transport.bpm.value = 80;
+                const piano = new Tone.Synth({oscillator: {type: 'triangle'}}).toDestination();
+                instruments.push(piano);
+                const notes = ["C5","E5","G5","B4","D5"];
+                const loop = new Tone.Loop(time => {
+                    piano.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)], '16n', time);
+                }, '8n').start(0);
+                scheduledEvents.push(loop);
+            },
+            tabidachi() {
+                this.cleanup(); Tone.Transport.bpm.value = 120;
+                const brass = new Tone.Synth({oscillator: {type: 'sawtooth'}}).toDestination();
+                instruments.push(brass);
+                const notes = ["C4","E4","G4"];
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    brass.triggerAttackRelease(notes[idx % 3], '8n', time); idx++;
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            bouken() {
+                this.cleanup(); Tone.Transport.bpm.value = 130;
+                const lead = new Tone.MonoSynth().toDestination();
+                instruments.push(lead);
+                const notes = ["A4","E4","F#4","C5"];
+                const loop = new Tone.Loop(time => {
+                    lead.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)], '16n', time);
+                }, '8n').start(0);
+                scheduledEvents.push(loop);
+            },
+            tatakai() {
+                this.cleanup(); Tone.Transport.bpm.value = 150;
+                const synth = new Tone.MembraneSynth().toDestination();
+                instruments.push(synth);
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("C2", '8n', time);
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            bossa() {
+                this.cleanup(); Tone.Transport.bpm.value = 110;
+                const synth = new Tone.Synth({oscillator: {type: 'triangle'}}).toDestination();
+                instruments.push(synth);
+                const notes = ["E4","G#4","B4"];
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease(notes[idx % 3], '8n', time); idx++;
+                }, '8n').start(0);
+                scheduledEvents.push(loop);
+            },
+            acid() {
+                this.cleanup(); Tone.Transport.bpm.value = 130;
+                const synth = new Tone.Synth({oscillator: {type: 'sawtooth'}}).toDestination();
+                instruments.push(synth);
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("C3", '16n', time); idx++;
+                }, '16n').start(0);
+                scheduledEvents.push(loop);
+            },
+            happycore() {
+                this.cleanup(); Tone.Transport.bpm.value = 170;
+                const synth = new Tone.MetalSynth().toDestination();
+                instruments.push(synth);
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("G4", '8n', time); idx++;
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            metal() {
+                this.cleanup(); Tone.Transport.bpm.value = 180;
+                const synth = new Tone.MembraneSynth().toDestination();
+                instruments.push(synth);
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("C1", '8n', time); idx++;
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            minimal() {
+                this.cleanup(); Tone.Transport.bpm.value = 105;
+                const synth = new Tone.Synth({oscillator: {type: 'pulse'}}).toDestination();
+                instruments.push(synth);
+                let idx = 0;
+                const loop = new Tone.Loop(time => {
+                    synth.triggerAttackRelease("C4", '8n', time); idx++;
+                }, '4n').start(0);
+                scheduledEvents.push(loop);
+            },
+            trance() {
+                this.cleanup(); Tone.Transport.bpm.value = 140;
+                const kick = new Tone.MembraneSynth().toDestination();
+                const delay = new Tone.FeedbackDelay("8n.", 0.5).toDestination();
+                const arpeggiator = new Tone.Synth({oscillator: {type: 'fatsawtooth'}}).connect(delay);
+                arpeggiator.volume.value = -18;
+                instruments.push(kick, delay, arpeggiator);
+                const kickLoop = new Tone.Loop(time => kick.triggerAttackRelease('C1', '8n', time), '4n').start(0);
+                const notes = ['C4', 'E4', 'G4', 'B4'];
+                let idx = 0;
+                const arpLoop = new Tone.Loop(time => {
+                    arpeggiator.triggerAttackRelease(notes[idx % notes.length], '16n', time);
+                    idx++;
+                }, '16n').start(0);
+                scheduledEvents.push(kickLoop, arpLoop);
+            }
+        };
+
+        function setStatus(text, isLoading) {
+            statusIndicator.classList.remove('hidden');
+            statusText.textContent = text;
+            loadingSpinner.style.display = isLoading ? 'block' : 'none';
+        }
+        function hideStatus() { statusIndicator.classList.add('hidden'); }
+        function updatePlayButton() {
+            playIcon.classList.toggle('hidden', isPlaying);
+            pauseIcon.classList.toggle('hidden', !isPlaying);
+        }
+
+        async function generateMusic(style) {
+            if (typeof bgmFactory[style] !== 'function') {
+                setStatus('選択されたスタイルが無効です。', false);
+                return;
+            }
+            if (Tone.context.state !== 'running') await Tone.start();
+            currentStyle = style;
+            setStatus('BGMを生成中...', true);
+            buttonGrid.querySelectorAll('button').forEach(b => b.disabled = true);
+            setTimeout(() => {
+                try {
+                    bgmFactory[style]();
+                    Tone.Transport.start();
+                    isPlaying = true;
+                    player.classList.remove('hidden');
+                    currentBgmTitle.textContent = imageWords[style].name;
+                    updatePlayButton();
+                    hideStatus();
+                } catch (e) {
+                    setStatus('エラーが発生しました。', false);
+                } finally {
+                    buttonGrid.querySelectorAll('button').forEach(b => b.disabled = false);
+                }
+            }, 100);
+        }
+
+        async function downloadMp3() {
+    alert('MP3ダウンロードは今は仮機能です。');
+    hideStatus();
+}
+
