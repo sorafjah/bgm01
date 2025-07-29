@@ -9,7 +9,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Mochiy+Pop+One&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.0/lame.min.js"></script>
     <style>
         body { font-family: 'Noto Sans JP', sans-serif; }
         .font-display { font-family: 'Mochiy Pop One', sans-serif; }
@@ -21,6 +20,7 @@
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800">
+
     <div class="container mx-auto p-4 md:p-8 max-w-5xl">
         <header class="text-center mb-8">
             <h1 class="text-4xl md:text-5xl font-display text-gray-800">BGM Generator</h1>
@@ -74,70 +74,54 @@
 
         let isPlaying = false;
         let currentStyle = null;
-        let instruments = [];
-        let scheduledEvents = [];
+        let recorder;
+        let recordedBlob;
 
         // BGM Factory (ジャンルごとに分岐)
         const bgmFactory = {
             cleanup() {
                 Tone.Transport.stop();
                 Tone.Transport.cancel();
-                scheduledEvents.forEach(e => e.dispose && e.dispose());
-                instruments = [];
-                scheduledEvents = [];
+                Tone.context.resume();
             },
             yuttari() {
                 this.cleanup();
                 Tone.Transport.bpm.value = 75;
                 const pad = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sine' } }).toDestination();
-                instruments.push(pad);
-                const notes = [ 'C4','F4','G4','C4' ];
+                pad.connect(recorder);
+                const notes = ['C4','F4','G4','C4'];
                 let idx = 0;
-                const loop = new Tone.Loop(time => {
-                    pad.triggerAttackRelease(notes[idx++ % notes.length], '2n', time);
-                }, '2n').start(0);
-                scheduledEvents.push(loop);
+                new Tone.Loop(time => pad.triggerAttackRelease(notes[idx++%notes.length], '2n', time), '2n').start(0);
             },
             nobiyaka() {
                 this.cleanup();
                 Tone.Transport.bpm.value = 78;
-                const pad = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' } }).toDestination();
+                const pad    = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'triangle' } }).toDestination();
                 const melody = new Tone.Synth({ oscillator: { type: 'triangle' } }).toDestination();
-                instruments.push(pad, melody);
-                const padNotes = [ 'C4','G4','A4','F4' ];
-                let pIdx = 0;
-                const padLoop = new Tone.Loop(time => {
-                    pad.triggerAttackRelease(padNotes[pIdx++ % padNotes.length], '1n', time);
-                }, '1n').start(0);
-                const melodyNotes = [ 'E5','G5','F5','D5','C5' ];
-                let mIdx = 0;
-                const melodyLoop = new Tone.Loop(time => {
-                    melody.triggerAttackRelease(melodyNotes[mIdx++ % melodyNotes.length], '8n', time);
-                }, '2n').start(0);
-                scheduledEvents.push(padLoop, melodyLoop);
+                pad.connect(recorder);
+                melody.connect(recorder);
+                const padNotes    = ['C4','G4','A4','F4'];
+                const melodyNotes = ['E5','G5','F5','D5','C5'];
+                let pIdx = 0, mIdx = 0;
+                new Tone.Loop(time => pad.triggerAttackRelease(padNotes[pIdx++%padNotes.length], '1n', time), '1n').start(0);
+                new Tone.Loop(time => melody.triggerAttackRelease(melodyNotes[mIdx++%melodyNotes.length], '8n', time), '2n').start(0);
             },
             suzushige() {
                 this.cleanup();
                 Tone.Transport.bpm.value = 96;
-                const bell = new Tone.Synth({ oscillator: { type: 'sine' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0.3, release: 1.2 } }).toDestination();
-                instruments.push(bell);
-                const notes = [ 'A5','E5','B5','G#5','C#6' ];
+                const bell = new Tone.Synth({ oscillator: { type:'sine' }, envelope: { attack:0.01, decay:0.1, sustain:0.3, release:1.2 } }).toDestination();
+                bell.connect(recorder);
+                const notes = ['A5','E5','B5','G#5','C#6'];
                 let idx = 0;
-                const loop = new Tone.Loop(time => {
-                    bell.triggerAttackRelease(notes[idx++ % notes.length], '16n', time);
-                }, '4n').start(0);
-                scheduledEvents.push(loop);
+                new Tone.Loop(time => bell.triggerAttackRelease(notes[idx++%notes.length], '16n', time), '4n').start(0);
             },
             bouken() {
                 this.cleanup();
                 Tone.Transport.bpm.value = 130;
                 const lead = new Tone.MonoSynth().toDestination();
-                instruments.push(lead);
-                const notes = [ 'A4','E4','F#4','C5' ];
-                const loop = new Tone.Loop(time => {
-                    lead.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)], '16n', time);
-                }, '8n').start(0);
-                scheduledEvents.push(loop);
+                lead.connect(recorder);
+                const notes = ['A4','E4','F#4','C5'];
+                new Tone.Loop(time => lead.triggerAttackRelease(notes[Math.floor(Math.random()*notes.length)], '16n', time), '8n').start(0);
             }
         };
 
@@ -156,13 +140,20 @@
 
         async function generateMusic(style) {
             if (!bgmFactory[style]) {
-                setStatus('選択されたスタイルが無効です。', false);
+                setStatus('無効なスタイルです。', false);
                 return;
             }
             if (Tone.context.state !== 'running') await Tone.start();
+
+            // Recorder 初期化
+            recorder = new Tone.Recorder();
+            recorder.start();
+
             currentStyle = style;
             setStatus('BGMを生成中...', true);
             buttonGrid.querySelectorAll('button').forEach(b => b.disabled = true);
+
+            // 少し遅延させてループ処理開始
             setTimeout(() => {
                 try {
                     bgmFactory[style]();
@@ -172,19 +163,46 @@
                     currentBgmTitle.textContent = imageWords[style].name;
                     updatePlayButton();
                     hideStatus();
+
+                    // 自動停止
+                    setTimeout(async () => {
+                        Tone.Transport.stop();
+                        isPlaying = false;
+                        updatePlayButton();
+
+                        // 録音停止
+                        recordedBlob = await recorder.stop();
+                    }, BGM_DURATION_SECONDS * 1000);
                 } catch (e) {
-                    setStatus('エラーが発生しました。', false);
                     console.error(e);
+                    setStatus('エラーが発生しました。', false);
                 } finally {
                     buttonGrid.querySelectorAll('button').forEach(b => b.disabled = false);
                 }
             }, 100);
         }
 
-        function downloadMp3() {
-            alert('MP3ダウンロードは今は仮機能です。');
-            hideStatus();
-        }
+        // ダウンロードボタン
+        downloadBtn.addEventListener('click', () => {
+            if (recordedBlob) {
+                const url = URL.createObjectURL(recordedBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = currentBgmTitle.textContent + '.mp3';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+        });
+
+        // 再生／一時停止
+        playPauseBtn.addEventListener('click', () => {
+            if (!currentStyle) return;
+            if (isPlaying) Tone.Transport.pause(); else Tone.Transport.start();
+            isPlaying = !isPlaying;
+            updatePlayButton();
+        });
 
         // ボタン生成
         function populateButtons() {
@@ -196,23 +214,7 @@
                 buttonGrid.appendChild(btn);
             });
         }
-
-        playPauseBtn.addEventListener('click', () => {
-            if (!currentStyle) return;
-            if (isPlaying) {
-                Tone.Transport.pause();
-            } else {
-                Tone.Transport.start();
-            }
-            isPlaying = !isPlaying;
-            updatePlayButton();
-        });
-
-        downloadBtn.addEventListener('click', downloadMp3);
-
-        window.addEventListener('DOMContentLoaded', () => {
-            populateButtons();
-        });
+        window.addEventListener('DOMContentLoaded', () => populateButtons());
     </script>
 </body>
 </html>
